@@ -1,0 +1,6 @@
+{
+  "name": "evaluasi-milea",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=20" }
+}
