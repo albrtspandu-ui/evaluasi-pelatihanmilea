@@ -43,8 +43,67 @@ function buildPrompt(p) {
 function parseJSON(text) {
   const s = String(text || "").replace(/```json|```/g, "");
   const a = s.indexOf("{"), b = s.lastIndexOf("}");
-  if (a < 0 || b <= a) throw new Error("Respons AI bukan JSON");
-  return JSON.parse(s.slice(a, b + 1));
+  if (a < 0 || b <= a) throw new Error("NOT_JSON");
+  const body = s.slice(a, b + 1);
+  try { return JSON.parse(body); }
+  catch {
+    // Perbaikan ringan: tanda kutip miring & koma berlebih sebelum } atau ]
+    return JSON.parse(body.replace(/[\u201C\u201D]/g, '"').replace(/,\s*([}\]])/g, "$1"));
+  }
+}
+
+/* Panggil GitHub Models. Coba mode JSON dulu; bila model menolak parameter itu, ulangi tanpa. */
+async function callModels(token, model, messages, maxTokens) {
+  const send = (useJsonMode) => fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json", "Accept": "application/vnd.github+json" },
+    body: JSON.stringify({
+      model, temperature: 0.3, max_tokens: maxTokens, messages,
+      ...(useJsonMode ? { response_format: { type: "json_object" } } : {})
+    })
+  });
+  let r = await send(true);
+  if (r.status === 400) {
+    const t = await r.text().catch(() => "");
+    console.warn("Mode JSON ditolak, ulangi tanpa response_format:", t.slice(0, 300));
+    r = await send(false);
+  }
+  return r;
+}
+
+/* Ubah hasil panggilan menjadi { json } atau { status, error, detail } */
+async function runModel(token, model, messages, maxTokens) {
+  let r;
+  try { r = await callModels(token, model, messages, maxTokens); }
+  catch (err) {
+    console.error("Koneksi ke GitHub Models gagal:", err);
+    return { status: 502, error: "Tidak dapat terhubung ke GitHub Models", detail: String(err?.cause?.code || err?.message || err) };
+  }
+  if (r.status === 429) return { status: 429, error: "Kuota GitHub Models sedang habis, coba lagi nanti" };
+  if (r.status === 401 || r.status === 403) return { status: 502, error: "Token GitHub Models ditolak (cek izin Models atau masa berlaku token)" };
+  if (r.status === 404 || r.status === 400) {
+    const t = await r.text().catch(() => "");
+    console.error("GitHub Models", r.status, t);
+    return { status: 502, error: "Model atau permintaan ditolak GitHub Models (status " + r.status + ")", detail: t.slice(0, 300) };
+  }
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    console.error("GitHub Models", r.status, t);
+    return { status: 502, error: "Layanan AI merespons status " + r.status, detail: t.slice(0, 300) };
+  }
+  const data = await r.json().catch(() => null);
+  const choice = data?.choices?.[0];
+  const content = choice?.message?.content;
+  if (!content) {
+    console.error("Respons kosong dari GitHub Models:", JSON.stringify(data).slice(0, 1000));
+    const reason = choice?.finish_reason || "tidak diketahui";
+    return { status: 502, error: reason === "content_filter" ? "Respons AI diblokir filter konten" : "Respons AI kosong (" + reason + ")" };
+  }
+  try { return { json: parseJSON(content) }; }
+  catch {
+    console.error("Respons AI bukan JSON valid. finish_reason=" + choice?.finish_reason + "\n" + content.slice(0, 2000));
+    return { status: 502, error: choice?.finish_reason === "length" ? "Respons AI terpotong (terlalu panjang)" : "Respons AI tidak berformat JSON", detail: content.slice(0, 200) };
+  }
 }
 
 export default async function handler(req, res) {
@@ -67,26 +126,10 @@ export default async function handler(req, res) {
     comments: list(body.comments)
   };
 
-  try {
-    const r = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Authorization": "Bearer " + token, "Content-Type": "application/json", "Accept": "application/vnd.github+json" },
-      body: JSON.stringify({
-        model, temperature: 0.3, max_tokens: 1000,
-        messages: [{ role: "system", content: SYSTEM }, { role: "user", content: buildPrompt(p) }]
-      })
-    });
-    if (r.status === 429) return res.status(429).json({ error: "Kuota GitHub Models sedang habis, coba lagi nanti" });
-    if (r.status === 401 || r.status === 403) return res.status(502).json({ error: "Token GitHub Models ditolak (cek izin Models atau masa berlaku token)" });
-    if (!r.ok) {
-      console.error("GitHub Models error", r.status, await r.text().catch(() => ""));
-      return res.status(502).json({ error: "Layanan AI merespons status " + r.status });
-    }
-    const data = await r.json();
-    const json = parseJSON(data?.choices?.[0]?.message?.content);
-    return res.status(200).json({ masukan: Array.isArray(json.masukan) ? json.masukan : [] });
-  } catch (err) {
-    console.error(err);
-    return res.status(502).json({ error: "Rangkuman AI gagal diproses" });
-  }
+  const out = await runModel(token, model, [
+    { role: "system", content: SYSTEM },
+    { role: "user", content: buildPrompt(p) }
+  ], 1000);
+  if (out.error) return res.status(out.status).json({ error: out.error, detail: out.detail });
+  return res.status(200).json({ masukan: Array.isArray(out.json.masukan) ? out.json.masukan : [] });
 }
