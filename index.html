@@ -592,7 +592,7 @@ async function aiFeedback(){
     catch (e) { throw new Error("tidak dapat menghubungi server"); }
     let json = {};
     try { json = await res.json(); } catch (e) {}
-    if (!res.ok) throw new Error(json.error || ("server merespons status " + res.status));
+    if (!res.ok) throw new Error((json.error || ("server merespons status " + res.status)) + (json.detail ? " — " + json.detail : ""));
     const lines = (Array.isArray(json.masukan) ? json.masukan : []).map(s => String(s).replace(/^\s*[-•*\d.)]+\s*/, "").trim()).filter(Boolean);
     setFeedback(lines.join("\n"));
     st.textContent = "Rangkuman AI siap. Tambahkan atau sunting poin bila perlu.";
