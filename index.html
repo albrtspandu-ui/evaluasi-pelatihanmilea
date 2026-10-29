@@ -218,15 +218,39 @@ details.raw .tools{ margin-top:6px; }
 .r-h{ margin-top:calc(18px * var(--k)); font-size:calc(13px * var(--k)); }
 .chart{ width:74%; margin-left:auto; margin-right:auto; margin-top:calc(8px * var(--k)); }
 .chart-title{ font-size:calc(19px * (0.5 + var(--kc) / 2)); }
-.plot{ height:calc(165px * var(--kc)); }
-.bar span{ font-size:calc(10px * var(--k)); }
-.avgline span{ font-size:calc(10px * var(--k)); }
-.cats div{ font-size:calc(8.5px * var(--k)); }
 .r-avg{ font-size:calc(10.5px * var(--k)); margin-top:calc(12px * var(--k)); margin-bottom:calc(10px * var(--k)); }
 .r-fb-h{ font-weight:700; font-size:calc(10.5px * var(--k)); margin-top:calc(8px * var(--k)); }
 .r-fb{ margin:calc(4px * var(--k)) 0 0; padding-left:24px; font-size:calc(10.5px * var(--k)); line-height:1.45; }
 .r-fb li{ margin-bottom:calc(4px * var(--k)); padding-left:4px; }
 .r-foot{ background:#000; color:#fff; }
+.r-info td:first-child{ width:172px; padding-right:10px; }
+.plot{ position:relative; height:calc(128px * var(--kc)); margin-left:28px; margin-right:34px; }
+.grid{ position:absolute; left:0; right:0; height:0; border-top:1px dashed #D9D9D9; }
+.grid.max{ border-top:1.5px solid #7F7F7F; }
+.grid span{ position:absolute; left:-28px; width:22px; top:calc(-5px * var(--k)); text-align:right; font-size:calc(7.5px * var(--k)); color:#7F7F7F; line-height:1; }
+.grid.max span{ color:#000; font-weight:700; }
+.bars{ position:absolute; inset:0; display:flex; border-bottom:1px solid #BFBFBF; }
+.slot{ flex:1; height:100%; display:flex; justify-content:center; }
+.track{ width:62%; height:100%; background:#C9D6EE; display:flex; flex-direction:column; justify-content:flex-end; }
+.bars.few .track{ width:42%; }
+.fill{ background:var(--navy-bar); position:relative; }
+.fill span{ position:absolute; z-index:2; left:50%; transform:translateX(-50%); top:calc(5px * var(--k)); padding:1px 3px; background:var(--navy-bar); white-space:nowrap; color:#fff; font-weight:700; font-size:calc(8.5px * var(--k)); line-height:1; }
+.fill.low span{ top:auto; bottom:100%; margin-bottom:2px; background:transparent; color:var(--navy-bar); }
+.avgline{ position:absolute; z-index:1; left:0; right:-34px; height:0; border-top:2px solid #A6A6A6; }
+.avgline span{ position:absolute; right:0; top:3px; font-weight:700; font-size:calc(8.5px * var(--k)); color:#000; line-height:1; }
+.cats{ display:flex; margin-left:28px; margin-right:34px; margin-top:4px; }
+.cats div{ flex:1; text-align:center; color:#595959; font-size:calc(7.5px * var(--k)); line-height:1.25; padding:0 4px; }
+.legend{ display:flex; justify-content:center; gap:16px; font-size:calc(7.5px * var(--k)); color:#595959; margin-top:calc(5px * var(--kc)); }
+.legend i{ display:inline-block; width:8px; height:8px; margin-right:4px; vertical-align:-1px; }
+
+/* Ukuran grafik MILEA (2 grafik, lebih besar) */
+.plot{ height:calc(165px * var(--kc)); }
+.fill span, .avgline span{ font-size:calc(10px * var(--k)); }
+.grid span{ font-size:calc(8.5px * var(--k)); }
+.cats div{ font-size:calc(8.5px * var(--k)); }
+.legend{ font-size:calc(8.5px * var(--k)); }
+.bars.few .track{ width:42%; }
+
 </style>
 </head>
 <body>
@@ -267,9 +291,9 @@ details.raw .tools{ margin-top:6px; }
           <input type="text" id="fJudul" placeholder="Nama Materi">
         </div>
         <div class="field">
-          <label for="fTanggal">Hari, tanggal <span class="sub">— pilih dari kalender atau ketik sendiri</span></label>
+          <label for="fTanggal">Hari, tanggal (periode) <span class="sub">— pilih dari kalender atau ketik sendiri</span></label>
           <div class="date-row">
-            <input type="text" id="fTanggal" placeholder="Hari, Tanggal">
+            <input type="text" id="fTanggal" placeholder="Hari, Tanggal (periode)">
             <input type="date" id="fDatePick" aria-label="Pilih tanggal dari kalender" title="Pilih dari kalender">
           </div>
         </div>
@@ -610,23 +634,27 @@ async function aiFeedback(){
    ========================================================= */
 const bullets = (text) => String(text || "").split("\n").map(s => s.replace(/^\s*([-•*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
 
-function chartHTML(r){
-  const vals = r.items.map(i => i.avg);
-  // Skala otomatis seperti grafik Excel: batas atas sedikit di atas nilai tertinggi
-  const minV = Math.min(...vals, r.groupAvg), maxV = Math.max(...vals, r.groupAvg);
-  const yMax = Math.min(5, maxV + 0.2), yMin = Math.max(0, minV - 0.6);
-  const h = (v) => Math.max(0, Math.min(1, (v - yMin) / (yMax - yMin))) * 100;
-  let bars = "", cats = "";
+function chartHTML(r, withLegend){
+  // Skala tetap 0–5 agar tinggi batang konsisten antar report.
+  // Biru tua = nilai aktual, biru muda = sisa menuju nilai maksimal 5.
+  const pct = (v) => Math.max(0, Math.min(5, v)) / 5 * 100;
+  let grid = "", bars = "", cats = "";
+  for (let v = 0; v <= 5; v++) {
+    grid += '<div class="grid' + (v === 5 ? ' max' : '') + '" style="bottom:' + pct(v) + '%"><span>' + v.toFixed(1) + '</span></div>';
+  }
   r.items.forEach(i => {
-    bars += '<div class="slot"><div class="bar" style="height:' + h(i.avg).toFixed(2) + '%"><span>' + fmt2(i.avg) + '</span></div></div>';
+    const h = pct(i.avg);
+    bars += '<div class="slot"><div class="track"><div class="fill' + (h < 14 ? ' low' : '') + '" style="height:' + h.toFixed(2) + '%"><span>' + fmt2(i.avg) + '</span></div></div></div>';
     cats += '<div>' + esc(i.label) + '</div>';
   });
   return '<div class="chart">' +
     '<div class="chart-title">' + esc(r.title) + '</div>' +
-    '<div class="plot">' + bars +
-      '<div class="avgline" style="bottom:' + h(r.groupAvg).toFixed(2) + '%"><span>' + fmt2(r.groupAvg) + '</span></div>' +
+    '<div class="plot">' + grid +
+      '<div class="bars' + (r.items.length <= 2 ? ' few' : '') + '">' + bars + '</div>' +
+      '<div class="avgline" style="bottom:' + pct(r.groupAvg).toFixed(2) + '%"><span>' + fmt2(r.groupAvg) + '</span></div>' +
     '</div>' +
     '<div class="cats">' + cats + '</div>' +
+    (withLegend ? '<div class="legend"><span><i style="background:#0B2160"></i>Nilai aktual</span><span><i style="background:#C9D6EE"></i>Sisa menuju 5.00</span></div>' : '') +
   '</div>';
 }
 
@@ -640,7 +668,7 @@ function render(){
     '<table class="r-info">' +
       '<tr><td>Program</td><td>: ' + val("fProgram") + '</td></tr>' +
       '<tr><td>Materi</td><td>: ' + val("fJudul") + '</td></tr>' +
-      '<tr><td>Hari, Tanggal</td><td>: ' + val("fTanggal") + '</td></tr>' +
+      '<tr><td>Hari, Tanggal (periode)</td><td>: ' + val("fTanggal") + '</td></tr>' +
       '<tr><td>Durasi</td><td>: ' + val("fDurasi") + '</td></tr>' +
       '<tr><td>Fasilitator</td><td>: ' + val("fTrainer") + '</td></tr>' +
       '<tr><td>Training Coordinator</td><td>: ' + val("fCoord") + '</td></tr>' +
@@ -652,8 +680,8 @@ function render(){
   if (!d) {
     html += '<div class="r-empty" style="height:480px">Grafik dan feedback akan muncul setelah data survei diunggah.</div>';
   } else {
-    d.results.forEach(r => {
-      html += chartHTML(r) + '<div class="r-avg">Nilai Rata-rata ' + r.key + ' = ' + fmt2(r.groupAvg) + '</div>';
+    d.results.forEach((r, idx) => {
+      html += chartHTML(r, idx === d.results.length - 1) + '<div class="r-avg">Nilai Rata-rata ' + r.key + ' = ' + fmt2(r.groupAvg) + '</div>';
     });
     const fb = bullets(state.feedback);
     html += '<div class="r-fb-h">Feedback/masukan:</div><ol class="r-fb">' +
