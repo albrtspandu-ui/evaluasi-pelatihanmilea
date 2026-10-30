@@ -635,12 +635,14 @@ async function aiFeedback(){
 const bullets = (text) => String(text || "").split("\n").map(s => s.replace(/^\s*([-•*]|\d+[.)])\s*/, "").trim()).filter(Boolean);
 
 function chartHTML(r, withLegend){
-  // Skala tetap 0–5 agar tinggi batang konsisten antar report.
+  // Skala tetap 3–5 (garis tiap 0.5) agar tinggi batang konsisten antar report.
   // Biru tua = nilai aktual, biru muda = sisa menuju nilai maksimal 5.
-  const pct = (v) => Math.max(0, Math.min(5, v)) / 5 * 100;
+  // Nilai di bawah 3.00 tidak punya batang; angkanya tetap tampil di dasar grafik.
+  const Y_MIN = 3, Y_MAX = 5;
+  const pct = (v) => (Math.max(Y_MIN, Math.min(Y_MAX, v)) - Y_MIN) / (Y_MAX - Y_MIN) * 100;
   let grid = "", bars = "", cats = "";
-  for (let v = 0; v <= 5; v++) {
-    grid += '<div class="grid' + (v === 5 ? ' max' : '') + '" style="bottom:' + pct(v) + '%"><span>' + v.toFixed(1) + '</span></div>';
+  for (let v = Y_MIN; v <= Y_MAX + 1e-9; v += 0.5) {
+    grid += '<div class="grid' + (Math.abs(v - Y_MAX) < 1e-9 ? ' max' : '') + '" style="bottom:' + pct(v) + '%"><span>' + v.toFixed(1) + '</span></div>';
   }
   r.items.forEach(i => {
     const h = pct(i.avg);
